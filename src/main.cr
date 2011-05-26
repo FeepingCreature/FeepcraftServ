@@ -28,9 +28,6 @@ void main() {
       return noise3 vec3f(v.x + noise3(v), v.y + noise3(-v), v.z);
     }
     auto pos = vec3f(ipos);
-    pos.x /= 2;
-    pos.y /= 2;
-    pos.z /= 2;
     auto val =
     - noise3x vec3f(pos.x / 64f, pos.y / 64f, pos.z / 64f) * 32
     + noise3x vec3f(pos.x / 32f, pos.y / 32f, pos.z / 32f) * 16

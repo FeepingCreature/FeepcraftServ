@@ -1,15 +1,16 @@
 module player;
 
-import drop, item, server, world, base, bigendian;
-import std.socket, std.stream, std.time, std.zlib;
+import drop, item, server, world, base, bigendian, packet-tx;
+import std.socket, std.stream, std.time;
 
 class Player : IPlayer {
   Server server;
   World world;
-  Socket sock;
+  Socket socket;
   string name;
   int eid;
   BigEndianDataStream ds;
+  PacketTx tx;
   double x, y, z, stance;
   float yaw, pitch;
   bool onGround;
@@ -18,118 +19,31 @@ class Player : IPlayer {
   vec2i lastPlayerChunkPos;
   vec3i lastPlayerBlockPos;
   Player[] otherPlayers() return [for pl <- server.selectOthers this: Player: pl].eval;
-  Socket getSocket() return sock;
+  Socket getSocket() return socket;
   string getName() return name;
-  void init(Server server, World world, Socket sock) {
+  void init(Server server, World world, Socket socket) {
     this.server = server;
     this.world = world;
     (x, y, z) = (8.0, 64.0, 8.0);
     stance = y + 2;
-    this.sock = sock;
-    ds = new BigEndianDataStream(readDg &sock.recv #.(&step, &ivalid));
+    this.socket = socket;
+    ds = new BigEndianDataStream(readDg &socket.recv #.(&step, &ivalid));
+    tx = new PacketTx socket;
     lastPing = sec();
   }
   byte yawByte() { int iyaw = int:(yaw * 256f / 360); return *byte*: &iyaw; }
   byte pitchByte() { int ipitch = int:(pitch * 256f / 360); return *byte*: &ipitch; }
-  void sendPacket(byte kind, byte[] data = byte[]:(null x 2)) {
-    sock.send void[]:(&kind#[0..1]);
-    if data.length sock.send void[]:data;
-  }
-  void sendLoginResponse(int protver, string name, long seed, byte dimension) {
-    byte[auto~] data;
-    eid = eidCount ++;
-    data ~= toField eid;
-    data ~= name.encodeUCS2();
-    data ~= toField seed;
-    data ~= dimension;
-    sendPacket(1, data[]);
-    data.free;
-  }
-  void sendSpawnLocation(int x, y, z) {
-    byte[auto~] data;
-    data ~= toField x;
-    data ~= toField y;
-    data ~= toField z;
-    sendPacket(6, data[]);
-    data.free;
-  }
-  void sendPreChunk(int x, z, bool load) {
-    byte[auto~] data;
-    data ~= toField x;
-    data ~= toField z;
-    data ~= *byte*:&load;
-    sendPacket(0x32, data[]);
-    data.free;
-  }
-  void sendEmptyInventory() {
-    byte[auto~] data;
-    data ~= 0; // inv
-    data ~= toField short:45;
-    for 0..45 {
-      data ~= toField short:-1;
-    }
-    sendPacket(0x68, data[]);
-    data.free;
-    data ~= -1; // init
-    data ~= toField short:-1; // init
-    data ~= toField short:-1;
-    data ~= byte:0;
-    data ~= toField short:0;
-    sendPacket(0x67, data[]);
-    data.free;
-  }
-  void sendMapChunk(vec3i intPos, vec3i intSize) {
-    byte[auto~] data;
-    data ~= toField intPos.x;
-    data ~= toField short:intPos.y;
-    data ~= toField intPos.z;
-    data ~= *byte*:&intSize.x;
-    data ~= *byte*:&intSize.y;
-    data ~= *byte*:&intSize.z;
-    byte[auto~] types, metadata, light, skylight;
-    auto ch = world.lookupChunkAt intPos;
-    types ~= ch.data;
-    for int x <- 0..intSize.x+1
-      for int z <- 0..intSize.z+1 {
-        for (int y = 0; y <= intSize.y; y += 2) {
-          metadata ~= 0;
-          light ~= 0xff;
-          skylight ~= 0xff;
-        }
-      }
-    byte[auto~] all;
-    all ~= types[];    types.free;
-    all ~= metadata[]; metadata.free;
-    all ~= light[];    light.free;
-    all ~= skylight[]; skylight.free;
-    auto def = new Deflate;
-    onSuccess def.fini;
-    auto compressed = def.deflate all[];
-    // writeln "uncompressed size: $(all.length)";
-    all.free;
-    // writeln "compressed size: $(compressed.length)";
-    data ~= toField compressed.length;
-    data ~= compressed;
-    compressed.free;
-    sendPacket(0x33, data[]);
-    data.free;
-  }
+  void sendChatMessage(string msg) tx.sendChatMessage msg;
+  void removeEntity(int eid) tx.sendEntityRemove eid;
   void sendNewChunk(vec2i v) {
-    sendPreChunk(v, true);
+    tx.sendPreChunk(v, true);
     vec3i pos = vec3i(v.(x << 4, 0, y << 4));
-    sendMapChunk(pos, vec3i(15, 63, 15));
+    tx.sendMapChunk(pos, vec3i(15, 63, 15), world.lookupChunkAt pos);
     pos.y += 64;
-    sendMapChunk(pos, vec3i(15, 63, 15));
+    tx.sendMapChunk(pos, vec3i(15, 63, 15), world.lookupChunkAt pos);
   }
   void unloadChunk(vec2i v) {
-    sendPreChunk(v, false);
-  }
-  void pickupItemAnim(Drop d) {
-    byte[auto~] data;
-    data ~= toField d.eid;
-    data ~= toField eid;
-    sendPacket(0x16, data[]);
-    data.free;
+    tx.sendPreChunk(v, false);
   }
   void playerMovementChecks() {
     auto playerBlockPos = vec3i(int:x, int:y, int:z);
@@ -141,11 +55,11 @@ class Player : IPlayer {
     auto playerAbsPos = vec3i(int:(x * 32), int:(y * 32), int:(z * 32));
     while i < world.drops.length {
       auto d = world.drops[i];
-      if |d.pos - playerAbsPos| < 32 {
-        pickupItemAnim d;
+      if |d.pos - playerAbsPos| / 32 < 1.6 {
+        tx.sendPickupItemAnim (eid, d);
         world.removeDrop d;
         for auto player <- server.players
-          player.removeEntity d.eid;
+          (Player:player).tx.sendEntityRemove d.eid;
       }
       i++;
     }
@@ -179,42 +93,12 @@ class Player : IPlayer {
       loadedChunks.free;
     loadedChunks = newChunks[];
   }
-  void sendPlayerPosLook() {
-    byte[auto~] data;
-    data ~= toField x;
-    data ~= toField double:(y + 1.65);
-    data ~= toField y;
-    data ~= toField z;
-    data ~= toField yaw;
-    data ~= toField pitch;
-    data ~= *byte*:&onGround;
-    sendPacket(0x0d, data[]);
-    data.free;
-  }
-  void sendChatMessage(string msg) {
-    byte[auto~] data;
-    data ~= msg.encodeUCS2();
-    sendPacket(0x03, data[]);
-    data.free;
-  }
   void readHandshake() {
     auto str = ds.readUCS2(ds.readShort() * 2);
-    sendPacket(2, encodeUCS2("-"));
+    tx.sendPacket(2, encodeUCS2("-"));
   }
   void spawnEntityFor(Player pl) {
-    byte[auto~] data;
-    using pl {
-      data ~= toField eid;
-      data ~= name.encodeUCS2();
-      data ~= toField int:(x*32);
-      data ~= toField int:(y*32);
-      data ~= toField int:(z*32);
-      data ~= yawByte(); // rotation
-      data ~= pitchByte(); // pitch
-      data ~= toField short:0; // current item
-    }
-    sendPacket(0x14, data[]);
-    data.free;
+    tx.sendEntitySpawn(eid, name, vec3i(int:(x * 32), int:(y * 32), int:(z * 32)), yawByte(), pitchByte());
   }
   void readLoginRequest() {
     auto protver = ds.readInt();
@@ -223,14 +107,17 @@ class Player : IPlayer {
     writeln "Logging in: $name";
     ds.readLong(); // map seed
     ds.readByte(); // dimension
-    sendLoginResponse(11, string:(null x 2), 0, 0);
-    sendSpawnLocation(0, 64, 0);
-    sendEmptyInventory();
-    playerMovementChecks();
-    sendPlayerPosLook();
-    sendChatMessage "<server> Hi! I am feepserv!";
-    sendChatMessage "<server> I am pretty crashy, so don't";
-    sendChatMessage "<server> get worried when you disconnect! ";
+    eid = eidCount ++;
+    using tx {
+      sendLoginResponse(eid, 11, string:(null x 2), 0, 0);
+      sendSpawnLocation(0, 64, 0);
+      sendEmptyInventory();
+      playerMovementChecks();
+      sendPlayerPosLook(x, y, z, yaw, pitch, onGround);
+      sendChatMessage "<server> Hi! I am feepserv!";
+      sendChatMessage "<server> I am pretty crashy, so don't";
+      sendChatMessage "<server> get worried when you disconnect! ";
+    }
     server.removeConnectingPlayer(this);
     server.addPlayer(this);
     server.broadcast("[server] $name has joined! ");
@@ -240,24 +127,14 @@ class Player : IPlayer {
       spawnEntityFor other;
     }
   }
+  void updatePosLookFor(Player pl) {
+    using pl this.tx.sendPosLook(eid, vec3i(int:(x * 32), int:(y * 32), int:(z * 32)), yawByte(), pitchByte());
+  }
   void readChatMessage() {
     auto msg = ds.readUCS2(ds.readShort() * 2);
     auto line = "<$name> $msg";
     writeln line;
     server.broadcast line;
-  }
-  void updatePosLookFor(Player pl) {
-    ubyte[auto~] data;
-    using pl {
-      data ~= toField eid;
-      data ~= toField int:(x * 32);
-      data ~= toField int:(y * 32);
-      data ~= toField int:(z * 32);
-      data ~= yawByte();
-      data ~= pitchByte();
-    }
-    sendPacket(0x22, data[]);
-    data.free;
   }
   void updatePosLook() {
     playerMovementChecks();
@@ -307,7 +184,7 @@ class Player : IPlayer {
     auto animation = ds.readByte();
     if (animation < 4) writeln ["None", "Swing Arm", "Damage", "Leave bed"][animation];
     else writeln "animation $$int:animation";
-    sendPacket(0);
+    tx.sendPacket(0);
   }
   void updateBlock(vec3i worldPos, byte newval) {
     auto chunkPos = vec3i(worldPos.(x >> 4, y >> 6, z >> 4));
@@ -316,37 +193,14 @@ class Player : IPlayer {
       if (ch == chunkPos.xz)
         found = true;
     if !found return; // not visible
-    byte[auto~] data;
-    data ~= toField worldPos.x;
-    data ~= *byte*:&worldPos.y;
-    data ~= toField worldPos.z;
-    data ~= newval;
-    data ~= byte:0;
-    sendPacket(0x35, data[]);
-    data.free;
+    tx.sendBlockUpdate(worldPos, newval);
   }
   void animatePlayer(Player pl, byte anim) {
-    byte[auto~] data;
-    data ~= toField pl.eid;
-    data ~= anim;
-    sendPacket(0x12, data[]);
-    data.free;
+    tx.sendPlayerAnim(pl.eid, anim);
   }
-  void spawnItem(Drop dr) using dr {
-    byte[auto~] data;
-    data ~= toField eid;
-    data ~= toField item.id;
-    data ~= byte:1;
-    data ~= toField short:0;
-    data ~= toField int:pos.x;
-    data ~= toField int:pos.y;
-    data ~= toField int:pos.z;
-    data ~= byte:0; // rotation
-    data ~= byte:0; // pitch
-    data ~= byte:0; // roll
-    writeln "$name: spawn item at $(pos) ($$short:item.id)";
-    sendPacket(0x15, data[]);
-    data.free;
+  void spawnItem(Drop dr) {
+    tx.sendItemSpawn(dr);
+    writeln "$name: spawn item at $(dr.pos) ($$short:dr.item.id)";
   }
   void readPlayerDigging() {
     byte status = ds.readByte();
@@ -372,21 +226,16 @@ class Player : IPlayer {
     short slotId = ds.readShort();
     writeln "Player switched to slot $$int:slotId";
   }
-  void sendPing() { lastPing = sec(); sendPacket(0); }
+  void sendPing() { lastPing = sec(); tx.sendPacket(0); }
   void readPing() { sendPing; }
   void considerPing() {
     if (float:(sec() - lastPing) > 1.0) sendPing;
-  }
-  void removeEntity(int eid) {
-    byte[auto~] data;
-    data ~= toField eid;
-    sendPacket(0x1d, data[]);
-    data.free;
   }
   void removeSelf(bool quietly) {
     for auto other <- otherPlayers() {
       other.removeEntity eid;
     }
+    tx.sendKick();
     server.removePlayer this;
     if !quietly
       server.broadcast("[server] $name has quit. ");
@@ -404,9 +253,9 @@ class Player : IPlayer {
   void readPacket() {
     considerPing;
     using SelectSet ss {
-      add(sock, read => true);
+      add(socket, read => true);
       select timeout => 0;
-      if !isReady(sock, read => true) return;
+      if !isReady(socket, read => true) return;
     }
     auto kind = ds.readByte();
     if kind == 0x00 readPing();
