@@ -1,6 +1,7 @@
 module packet-tx;
 
-import std.socket, bigendian, world, std.zlib, drop, base;
+import std.socket, std.zlib;
+import bigendian, world, drop, base, item;
 
 class PacketTx {
   Socket socket;
@@ -49,6 +50,21 @@ class PacketTx {
     data ~= byte:0;
     data ~= toField short:0;
     sendPacket(0x67, data[]);
+    data.free;
+  }
+  void sendInventory(Item[] items) {
+    byte[auto~] data;
+    data ~= 0; // inv
+    data ~= toField short:items.length;
+    for auto item <- items
+      if item {
+        data ~= toField item.id;
+        data ~= byte:1;
+        data ~= toField short:0;
+      } else {
+        data ~= toField short:-1;
+      }
+    sendPacket(0x68, data[]);
     data.free;
   }
   void sendMapChunk(vec3i intPos, vec3i intSize, World.Chunk ch) {

@@ -1,6 +1,6 @@
 module main;
 
-import std.socket, std.boehm, std.thread;
+import std.socket, std.boehm, std.thread, std.math;
 
 import base, simplex, player, server, world;
 
@@ -28,10 +28,12 @@ void main() {
       return noise3 vec3f(v.x + noise3(v), v.y + noise3(-v), v.z);
     }
     auto pos = vec3f(ipos);
-    auto val =
-    - noise3x vec3f(pos.x / 64f, pos.y / 64f, pos.z / 64f) * 32
-    + noise3x vec3f(pos.x / 32f, pos.y / 32f, pos.z / 32f) * 16
-    + noise3x vec3f(pos.x / 16f, pos.y / 16f, pos.z / 16f) * 8
+    auto val = 0
+    + noise3x vec3f(pos.x /256f, pos.y /256f, pos.z /256f) * 64
+    - noise3x vec3f(pos.x /128f, pos.y /128f, pos.z /128f) * 32
+    - noise3x vec3f(pos.x / 64f, pos.y / 64f, pos.z / 64f) * 16
+    - noise3x vec3f(pos.x / 32f, pos.y / 32f, pos.z / 32f) * 8
+    - noise3x vec3f(pos.x / 16f, pos.y / 16f, pos.z / 16f) * 4
     // + noise3x vec3f(pos.x /  8f, pos.y /  8f, pos.z /  8f) * 4
     ;
     val += ipos.y - 60;
