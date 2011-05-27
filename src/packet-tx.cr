@@ -52,14 +52,14 @@ class PacketTx {
     sendPacket(0x67, data[]);
     data.free;
   }
-  void sendInventory(Item[] items) {
+  void sendInventory((Item, int)[] items) {
     byte[auto~] data;
     data ~= 0; // inv
     data ~= toField short:items.length;
     for auto item <- items
-      if item {
-        data ~= toField item.id;
-        data ~= byte:1;
+      if item[0] {
+        data ~= toField item[0].id;
+        data ~= *byte*:&item[1];
         data ~= toField short:0;
       } else {
         data ~= toField short:-1;
@@ -192,5 +192,13 @@ class PacketTx {
   void sendKick() {
     sendPacket(0xff);
     socket.close;
+  }
+  void sendTransactionAccept(byte window, short action-number, bool accepted) {
+    byte[auto~] data;
+    data ~= window;
+    data ~= toField action-number;
+    data ~= *byte*: &accepted;
+    sendPacket(0x6a, data[]);
+    data.free;
   }
 }

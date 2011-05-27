@@ -4,17 +4,23 @@ import drop, item, server, world, base, bigendian, packet-tx;
 import std.socket, std.stream, std.time;
 
 class Inventory {
-  Item[] items;
+  (Item, int)[] items;
   void init() {
-    items = new Item[] 45;
+    items = new (Item, int)[] 45;
   }
   void sendMe(PacketTx tx) {
     tx.sendInventory items;
   }
   void addItem(Item it) {
-    for int i <- 9..36 {
-      if !items[i] {
-        items[i] = it;
+    for int i <- seq(36..45, 9..36) {
+      writeln "look at $i";
+      alias item = items[i];
+      if item[0] && item[0].id == it.id {
+        item[1] ++;
+        return;
+      }
+      if !item[0] {
+        item = (it, 1);
         return;
       }
     }
@@ -83,9 +89,11 @@ class Player : IPlayer {
       auto d = world.drops[i];
       if |d.pos - playerAbsPos| / 32 < 1.6 {
         tx.sendPickupItemAnim (eid, d);
-        world.removeDrop d;
         for auto player <- server.players
           (Player:player).tx.sendEntityRemove d.eid;
+        world.removeDrop d;
+        inv.addItem new Item 3;
+        inv.sendMe tx;
       }
       i++;
     }
@@ -228,6 +236,11 @@ class Player : IPlayer {
     tx.sendItemSpawn(dr);
     writeln "$name: spawn item at $(dr.pos) ($$short:dr.item.id)";
   }
+  void broadcastUpdateBlock(vec3i pos, byte b) {
+    for auto player <- [for pl <- server.players: Player: pl] {
+      player.updateBlock(pos, b);
+    }
+  }
   void readPlayerDigging() {
     byte status = ds.readByte();
     auto pos = readBlockPosition();
@@ -238,13 +251,11 @@ class Player : IPlayer {
     if (status == 2) { // finished digging
       for auto player <- otherPlayers() player.animatePlayer(this, 0);
       world.changeBlock(pos, 0);
-      inv.addItem new Item 3;
-      inv.sendMe tx;
       for auto player <- [for pl <- server.players: Player: pl] {
         auto dr = new Drop(new Item 3, eidCount ++, vec3i(vec3f(pos) + 0.5 #.(int:(x * 32), int:(y * 32), int:(z * 32))));
         player.spawnItem(dr);
         world.drops ~= dr;
-        player.updateBlock(pos, 0);
+        broadcastUpdateBlock(pos, 0);
       }
     }
     writeln "Player digging at $x, $$int:y, $z (face $$int:face, status $$int:status)";
@@ -286,6 +297,7 @@ class Player : IPlayer {
     if (item-id != short:-1) {
       item-count = ds.readByte(); item-uses = ds.readShort();
     }
+    tx.sendTransactionAccept(0, action-number, true);
     writeln "click window $$int:id";
     writeln " slot $slot, right-click $right-click, action number $action-number, shift: $shift";
     writeln " item-id $item-id, item-count $$int:item-count, item-uses $item-uses";
@@ -298,8 +310,12 @@ class Player : IPlayer {
     if block-or-item-id >= 0 {
       amount = ds.readByte();
       damage = ds.readShort();
+      if (dir != -1) {
+        auto real-pos = pos + vec3i.([-Y, Y, -Z, Z, -X, X][dir]);
+        broadcastUpdateBlock(real-pos, *byte*:&block-or-item-id);
+        writeln "player placed: $block-or-item-id at $real-pos (dir $$int:dir)";
+      } else writeln "player placed: special case -1";
     }
-    auto real-pos = pos + vec3i.([-Y, Y, -Z, Z, -X, X][dir]);
   }
   void readPacket() {
     considerPing;
@@ -309,6 +325,7 @@ class Player : IPlayer {
       if !isReady(socket, read => true) return;
     }
     auto kind = ds.readByte();
+    // writeln "$name> $$int:kind";
     if kind == 0x00 readPing();
     else if kind == 0x01 readLoginRequest();
     else if kind == 0x02 readHandshake();
