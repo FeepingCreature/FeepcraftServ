@@ -3,6 +3,25 @@ module player;
 import drop, item, server, world, base, bigendian, packet-tx;
 import std.socket, std.stream, std.time;
 
+class Inventory {
+  Item[] items;
+  void init() {
+    items = new Item[] 45;
+  }
+  void sendMe(PacketTx tx) {
+    tx.sendInventory items;
+  }
+  void addItem(Item it) {
+    for int i <- 9..36 {
+      if !items[i] {
+        items[i] = it;
+        return;
+      }
+    }
+    raise-error new Error "Inventory full! ";
+  }
+}
+
 class Player : IPlayer {
   Server server;
   World world;
@@ -11,6 +30,8 @@ class Player : IPlayer {
   int eid;
   BigEndianDataStream ds;
   PacketTx tx;
+  Inventory inv;
+  
   double x, y, z, stance;
   float yaw, pitch;
   bool onGround;
@@ -24,6 +45,7 @@ class Player : IPlayer {
   void init(Server server, World world, Socket socket) {
     this.server = server;
     this.world = world;
+    inv = new Inventory;
     (x, y, z) = (8.0, 64.0, 8.0);
     stance = y + 2;
     this.socket = socket;
@@ -35,6 +57,10 @@ class Player : IPlayer {
   byte pitchByte() { int ipitch = int:(pitch * 256f / 360); return *byte*: &ipitch; }
   void sendChatMessage(string msg) tx.sendChatMessage msg;
   void removeEntity(int eid) tx.sendEntityRemove eid;
+  vec3i readBlockPosition() {
+    int x = ds.readInt(), y = ds.readByte(), z = ds.readInt();
+    return vec3i(x, y, z);
+  }
   void sendNewChunk(vec2i v) {
     tx.sendPreChunk(v, true);
     vec3i pos = vec3i(v.(x << 4, 0, y << 4));
@@ -204,15 +230,16 @@ class Player : IPlayer {
   }
   void readPlayerDigging() {
     byte status = ds.readByte();
-    int x = ds.readInt(); byte y = ds.readByte(); int z = ds.readInt();
+    auto pos = readBlockPosition();
     byte face = ds.readByte();
-    auto pos = vec3i(x, y, z);
     if (status == 0) {
       for auto player <- otherPlayers() player.animatePlayer(this, 1);
     }
     if (status == 2) { // finished digging
       for auto player <- otherPlayers() player.animatePlayer(this, 0);
       world.changeBlock(pos, 0);
+      inv.addItem new Item 3;
+      inv.sendMe tx;
       for auto player <- [for pl <- server.players: Player: pl] {
         auto dr = new Drop(new Item 3, eidCount ++, vec3i(vec3f(pos) + 0.5 #.(int:(x * 32), int:(y * 32), int:(z * 32))));
         player.spawnItem(dr);
@@ -250,6 +277,30 @@ class Player : IPlayer {
     auto id = ds.readByte();
     writeln "close window $$int:id";
   }
+  void readPlayerClickWindow() {
+    auto
+      id = ds.readByte(), slot = ds.readShort(),
+      right-click = bool:ds.readByte(), action-number = ds.readShort(),
+      shift = bool:ds.readByte(), item-id = ds.readShort();
+    byte item-count; short item-uses;
+    if (item-id != short:-1) {
+      item-count = ds.readByte(); item-uses = ds.readShort();
+    }
+    writeln "click window $$int:id";
+    writeln " slot $slot, right-click $right-click, action number $action-number, shift: $shift";
+    writeln " item-id $item-id, item-count $$int:item-count, item-uses $item-uses";
+  }
+  void readPlayerPlacingBlock() {
+    auto pos = readBlockPosition();
+    auto dir = ds.readByte();
+    auto block-or-item-id = ds.readShort();
+    byte amount; short damage;
+    if block-or-item-id >= 0 {
+      amount = ds.readByte();
+      damage = ds.readShort();
+    }
+    auto real-pos = pos + vec3i.([-Y, Y, -Z, Z, -X, X][dir]);
+  }
   void readPacket() {
     considerPing;
     using SelectSet ss {
@@ -268,11 +319,13 @@ class Player : IPlayer {
     else if kind == 0x0c readPlayerLook();
     else if kind == 0x0d readPlayerPosLook();
     else if kind == 0x0e readPlayerDigging();
+    else if kind == 0x0f readPlayerPlacingBlock();
     else if kind == 0x10 readPlayerHoldingChange();
     else if kind == 0x12 readPlayerAnimation();
     else if kind == 0x13 readPlayerEntityAction();
     else if kind == 0x64 readPlayerOpenWindow();
     else if kind == 0x65 readPlayerCloseWindow();
+    else if kind == 0x66 readPlayerClickWindow();
     else if kind == 0xff removeSelf(quietly => false);
     else {
       raise-error new Error "Unknown packet: $$int:kind";
