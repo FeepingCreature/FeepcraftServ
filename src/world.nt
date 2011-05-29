@@ -8,18 +8,21 @@ class World {
     vec3i pos;
     byte[] data;
     int getIdx(vec3i local) {
-      return local.y + 16 * (local.z + local.x * 64);
+      return local.y + 64 * (local.z + local.x * 16);
     }
   }
   Chunk[] chunks;
   Drop[] drops;
   void removeDrop(Drop d) {
     bool found;
-    while (int i, Drop drop) <- zip(0..-1, drops) && !found
+    int i;
+    while i < drops.length && !found {
+      auto drop = drops[i];
       if (int:drop == int:d) {
         found = true;
-        drops[i] = drops.popEnd;
-      }
+        drop = drops.popEnd;
+      } else i ++;
+    }
     if !found raise-error new Error "Can't remove: no such drop! ";
   }
   void init(byte delegate(vec3i) dg) {
@@ -40,6 +43,13 @@ class World {
     ch.data = data[];
     chunks ~= ch;
     return ch;
+  }
+  byte lookupBlock(vec3i pos) {
+    auto chunkPos = vec3i(pos.(x >> 4, y >> 6, z >> 4));
+    auto chunkWorldPos = vec3i(chunkPos.(x << 4, y << 6, z << 4));
+    auto chunk = lookupChunkAt chunkWorldPos;
+    auto delta = pos - chunkWorldPos;
+    return chunk.data[chunk.getIdx(delta)];
   }
   void changeBlock(vec3i pos, byte newVal) {
     auto chunkPos = vec3i(pos.(x >> 4, y >> 6, z >> 4));

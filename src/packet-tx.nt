@@ -5,8 +5,10 @@ import bigendian, world, drop, base, item;
 
 class PacketTx {
   Socket socket;
-  void init(Socket s) socket = s;
+  IPlayer ip;
+  void init(Socket s, IPlayer ip) (socket, this.ip) = (s, ip);
   void sendPacket(byte kind, byte[] data = byte[]:(null x 2)) {
+    // writeln "$(ip.getName())> $$int:kind";
     socket.send void[]:(&kind#[0..1]);
     if data.length socket.send void[]:data;
   }
@@ -33,23 +35,6 @@ class PacketTx {
     data ~= toField z;
     data ~= *byte*:&load;
     sendPacket(0x32, data[]);
-    data.free;
-  }
-  void sendEmptyInventory() {
-    byte[auto~] data;
-    data ~= 0; // inv
-    data ~= toField short:45;
-    for 0..45 {
-      data ~= toField short:-1;
-    }
-    sendPacket(0x68, data[]);
-    data.free;
-    data ~= -1; // init
-    data ~= toField short:-1; // init
-    data ~= toField short:-1;
-    data ~= byte:0;
-    data ~= toField short:0;
-    sendPacket(0x67, data[]);
     data.free;
   }
   void sendInventory((Item, int)[] items) {

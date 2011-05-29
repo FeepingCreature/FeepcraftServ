@@ -11,9 +11,25 @@ class Inventory {
   void sendMe(PacketTx tx) {
     tx.sendInventory items;
   }
+  string formatItems() {
+    char[auto~] res;
+    res ~= "[";
+    for auto tup <- items {
+      res ~= "{";
+      if tup[0] res ~= "$$tup[0]";
+      else res ~= "(nil)";
+      res ~= ", $$tup[1]";
+      res ~= "}, ";
+    }
+    res ~= "]";
+    return res[];
+  }
   void addItem(Item it) {
+    if !it {
+      writeln "Trying to add null item";
+      _interrupt 3;
+    }
     for int i <- seq(36..45, 9..36) {
-      writeln "look at $i";
       alias item = items[i];
       if item[0] && item[0].id == it.id {
         item[1] ++;
@@ -25,6 +41,15 @@ class Inventory {
       }
     }
     raise-error new Error "Inventory full! ";
+  }
+  Item takeFromSlot(int slot) {
+    auto field = 36 + slot;
+    alias item = items[field];
+    if !item[0] return null;
+    item[1] --;
+    auto res = item[0];
+    if !item[1] item[0] = null;
+    return res;
   }
 }
 
@@ -41,6 +66,7 @@ class Player : IPlayer {
   double x, y, z, stance;
   float yaw, pitch;
   bool onGround;
+  int slot;
   double lastPing;
   vec2i[] loadedChunks;
   vec2i lastPlayerChunkPos;
@@ -56,7 +82,7 @@ class Player : IPlayer {
     stance = y + 2;
     this.socket = socket;
     ds = new BigEndianDataStream(readDg &socket.recv #.(&step, &ivalid));
-    tx = new PacketTx socket;
+    tx = new PacketTx (socket, this);
     lastPing = sec();
   }
   byte yawByte() { int iyaw = int:(yaw * 256f / 360); return *byte*: &iyaw; }
@@ -77,6 +103,11 @@ class Player : IPlayer {
   void unloadChunk(vec2i v) {
     tx.sendPreChunk(v, false);
   }
+  void broadcastEntityRemove(int id) {
+    for auto player <- [for pl <- server.players: Player: pl] {
+      player.removeEntity id;
+    }
+  }
   void playerMovementChecks() {
     auto playerBlockPos = vec3i(int:x, int:y, int:z);
     if playerBlockPos == lastPlayerBlockPos && loadedChunks.length
@@ -89,13 +120,11 @@ class Player : IPlayer {
       auto d = world.drops[i];
       if |d.pos - playerAbsPos| / 32 < 1.6 {
         tx.sendPickupItemAnim (eid, d);
-        for auto player <- server.players
-          (Player:player).tx.sendEntityRemove d.eid;
+        broadcastEntityRemove d.eid;
         world.removeDrop d;
-        inv.addItem new Item 3;
+        inv.addItem d.item;
         inv.sendMe tx;
-      }
-      i++;
+      } else i++;
     }
     
     auto playerChunkPos = vec2i(int:x >> 4, int:z >> 4);
@@ -132,7 +161,7 @@ class Player : IPlayer {
     tx.sendPacket(2, encodeUCS2("-"));
   }
   void spawnEntityFor(Player pl) {
-    tx.sendEntitySpawn(eid, name, vec3i(int:(x * 32), int:(y * 32), int:(z * 32)), yawByte(), pitchByte());
+    using pl this.tx.sendEntitySpawn(eid, name, vec3i(int:(x * 32), int:(y * 32), int:(z * 32)), yawByte(), pitchByte());
   }
   void readLoginRequest() {
     auto protver = ds.readInt();
@@ -145,7 +174,7 @@ class Player : IPlayer {
     using tx {
       sendLoginResponse(eid, 11, string:(null x 2), 0, 0);
       sendSpawnLocation(0, 64, 0);
-      sendEmptyInventory();
+      inv.sendMe that;
       playerMovementChecks();
       sendPlayerPosLook(x, y, z, yaw, pitch, onGround);
       sendChatMessage "<server> Hi! I am feepserv!";
@@ -153,15 +182,16 @@ class Player : IPlayer {
       sendChatMessage "<server> get worried when you disconnect! ";
     }
     server.removeConnectingPlayer(this);
+    // spawn other players for me
+    for auto player <- [for pl <- server.players: Player: pl] {
+      player.spawnEntityFor this;
+      spawnEntityFor player;
+    }
     server.addPlayer(this);
     server.broadcast("[server] $name has joined! ");
-    // spawn other players for me
-    for auto other <- otherPlayers() {
-      other.spawnEntityFor this;
-      spawnEntityFor other;
-    }
   }
   void updatePosLookFor(Player pl) {
+    // writeln "tell $eid about $$pl.eid's movement";
     using pl this.tx.sendPosLook(eid, vec3i(int:(x * 32), int:(y * 32), int:(z * 32)), yawByte(), pitchByte());
   }
   void readChatMessage() {
@@ -245,24 +275,30 @@ class Player : IPlayer {
     byte status = ds.readByte();
     auto pos = readBlockPosition();
     byte face = ds.readByte();
+    writeln "Player digging at $pos (face $$int:face, status $$int:status)";
     if (status == 0) {
       for auto player <- otherPlayers() player.animatePlayer(this, 1);
     }
     if (status == 2) { // finished digging
       for auto player <- otherPlayers() player.animatePlayer(this, 0);
-      world.changeBlock(pos, 0);
-      for auto player <- [for pl <- server.players: Player: pl] {
-        auto dr = new Drop(new Item 3, eidCount ++, vec3i(vec3f(pos) + 0.5 #.(int:(x * 32), int:(y * 32), int:(z * 32))));
-        player.spawnItem(dr);
-        world.drops ~= dr;
+      auto block = world.lookupBlock(pos);
+      writeln "block at $pos: $$int:block";
+      if block {
+        auto dr = new Drop(new Item block, eidCount ++, vec3i(vec3f(pos) + 0.5 #.(int:(x * 32), int:(y * 32), int:(z * 32))));
+        
+        world.changeBlock(pos, 0);
         broadcastUpdateBlock(pos, 0);
+        
+        world.drops ~= dr;
+        for auto player <- [for pl <- server.players: Player: pl] {
+          player.spawnItem(dr);
+        }
       }
     }
-    writeln "Player digging at $x, $$int:y, $z (face $$int:face, status $$int:status)";
   }
   void readPlayerHoldingChange() {
-    short slotId = ds.readShort();
-    writeln "Player switched to slot $$int:slotId";
+    slot = ds.readShort();
+    writeln "Player switched to slot $slot";
   }
   void sendPing() { lastPing = sec(); tx.sendPacket(0); }
   void readPing() { sendPing; }
@@ -311,9 +347,13 @@ class Player : IPlayer {
       amount = ds.readByte();
       damage = ds.readShort();
       if (dir != -1) {
-        auto real-pos = pos + vec3i.([-Y, Y, -Z, Z, -X, X][dir]);
-        broadcastUpdateBlock(real-pos, *byte*:&block-or-item-id);
-        writeln "player placed: $block-or-item-id at $real-pos (dir $$int:dir)";
+        auto item = inv.takeFromSlot slot;
+        inv.sendMe tx;
+        if item {
+          auto real-pos = pos + vec3i.([-Y, Y, -Z, Z, -X, X][dir]);
+          broadcastUpdateBlock(real-pos, *byte*:&block-or-item-id);
+          writeln "player placed: $block-or-item-id at $(real-pos) (dir $$int:dir)";
+        } else writeln "No item to place! ";
       } else writeln "player placed: special case -1";
     }
   }
@@ -325,7 +365,7 @@ class Player : IPlayer {
       if !isReady(socket, read => true) return;
     }
     auto kind = ds.readByte();
-    // writeln "$name> $$int:kind";
+    // writeln "$name< $$int:kind";
     if kind == 0x00 readPing();
     else if kind == 0x01 readLoginRequest();
     else if kind == 0x02 readHandshake();

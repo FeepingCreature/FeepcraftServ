@@ -43,7 +43,8 @@ class Server {
         broadcast " * $(player.getName()) has disconnected: $err";
         return;
       }
-      player.readPacket();
+      if !player writeln "WTH. Null player? ";
+      else player.readPacket();
     }
   }
   void waitRead(float timeout) {

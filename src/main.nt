@@ -1,11 +1,12 @@
 module main;
 
-import std.socket, std.boehm, std.thread, std.math;
+import std.socket, std.boehm, std.thread, std.math, std.random;
 
 import base, simplex, player, server, world;
 
 void main() {
   initBoehm();
+  auto rng = getPRNG(23);
   set-handler (Error er) { writeln "!! $er"; invoke-exit "return"; }
   define-exit "return" return;
   auto ls = new Socket;
@@ -23,6 +24,16 @@ void main() {
       server.readPackets();
     }
   };
+  auto earth-density = new SimplexNoise rng;
+  auto sand-density = new SimplexNoise rng;
+  
+  auto waterline = 56;
+  auto triangle(int at, int spread) return new delegate float(float v) {
+    if v < at return (v - at) / spread;
+    return (at - v) / spread;
+  };
+  auto water-triangle = triangle (waterline - 2, 2);
+  
   auto dg1 = delegate byte(vec3i ipos) {
     float noise3x(vec3f v) {
       return noise3 vec3f(v.x + noise3(v), v.y + noise3(-v), v.z);
@@ -37,11 +48,19 @@ void main() {
     // + noise3x vec3f(pos.x /  8f, pos.y /  8f, pos.z /  8f) * 4
     ;
     val += ipos.y - 60;
-    if val < 0 return byte:3;
+    auto sandf = 2 * sand-density.eval (pos / 96) - 1;
+    sandf += (3 - abs val) / 3;
+    sandf += water-triangle ipos.y;
+    if sandf > 0 {
+      return byte:12;
+    }
+    if val < 0 {
+      if -val > -1 + 12 * earth-density.eval (pos / 64) - ((pos.y - waterline) / 24) return byte:1;
+      return byte:3;
+    }
     return byte:0;
   };
   auto dg2 = delegate byte(vec3i pos) {
-    auto waterline = 56;
     auto prelim = dg1(pos);
     if prelim == 0 {
       if pos.y < waterline return byte:8;
@@ -49,7 +68,6 @@ void main() {
     if prelim == 3 {
       auto above = dg1(pos + vec3i.Y);
       if above == 0 {
-        if pos.y == waterline - 1 return byte:12;
         if pos.y > waterline - 1 return byte:2;
       }
     }

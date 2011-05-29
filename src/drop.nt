@@ -7,4 +7,5 @@ class Drop {
   int eid;
   abs-vec3i pos;
   void init(Item it, int eid, abs-vec3i pos) this.(item, eid, pos) = (it, eid, pos);
+  string toString() if item return "[drop($eid) $item at $pos]"; else return "[drop($eid) (nil) at $pos";
 }

@@ -4,7 +4,9 @@ import std.socket;
 
 alias abs-vec3i = vec3i; // absolute world pos
 
-shared int eidCount = 1;
+shared int eidCount;
+
+void init() { eidCount = 1; }
 
 interface IPlayer {
   string getName();
@@ -21,9 +23,12 @@ template removeClassFrom(T) <<EOF
     int i;
     while i < ar.length {
       if int:ar[i] == int:t[1] {
+        if i == ar.length - 1 { ar = type-of ar: ar[0..$-1]; return; }
+        
         ar[i] = ar.popEnd();
         return;
       }
+      i++;
     }
     raise-error new Error "No $(t[1]) in $(t[0])!";
   }
