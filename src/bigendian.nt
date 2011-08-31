@@ -12,12 +12,11 @@ alias htonq = ntohq;
 
 class BigEndianDataStream {
   byte[auto~] buffer;
-  string delegate() stepDg;
-  bool delegate() ivalidDg;
-  void init(string delegate() sd, bool delegate() bd) (stepDg, ivalidDg) = (sd, bd);
+  Iterator!byte[] sup;
+  void init(Iterator!byte[] sup) this.sup = sup;
   void readMore() {
-    if !ivalidDg() raise-error new Error "DataStream empty. ";
-    buffer ~= byte[]:stepDg();
+    if auto data <- sup buffer ~= data;
+    else raise-error new Error "DataStream empty. ";
   }
   byte[] take(int sz) {
     while buffer.length < sz

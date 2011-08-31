@@ -17,9 +17,10 @@ class Server {
   }
   IPlayer[] selectOthers(IPlayer except) {
     IPlayer[auto~] res;
-    for auto player <- players
+    for auto player <- players {
       if int:player != int:except
         res ~= player;
+    }
     return res[];
   }
   void addPlayer(IPlayer pl) using autoLock serverMutex {

@@ -9,8 +9,8 @@ class PacketTx {
   void init(Socket s, IPlayer ip) (socket, this.ip) = (s, ip);
   void sendPacket(byte kind, byte[] data = byte[]:(null x 2)) {
     // writeln "$(ip.getName())> $$int:kind";
-    socket.send void[]:(&kind#[0..1]);
-    if data.length socket.send void[]:data;
+    socket.send byte[]:(&kind#[0..1]);
+    if data.length socket.send byte[]:data;
   }
   void sendLoginResponse(int eid, int protver, string name, long seed, byte dimension) {
     byte[auto~] data;

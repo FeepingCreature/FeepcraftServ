@@ -81,7 +81,7 @@ class Player : IPlayer {
     (x, y, z) = (8.0, 64.0, 8.0);
     stance = y + 2;
     this.socket = socket;
-    ds = new BigEndianDataStream(readDg &socket.recv #.(&step, &ivalid));
+    ds = new BigEndianDataStream(readDg &socket.recv);
     tx = new PacketTx (socket, this);
     lastPing = sec();
   }
