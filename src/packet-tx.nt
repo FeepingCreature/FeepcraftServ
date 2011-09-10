@@ -8,17 +8,22 @@ class PacketTx {
   IPlayer ip;
   void init(Socket s, IPlayer ip) (socket, this.ip) = (s, ip);
   void sendPacket(byte kind, byte[] data = byte[]:(null x 2)) {
-    // writeln "$(ip.getName())> $$int:kind";
+    // writeln "$(ip.getName())> $$int:kind $(data)";
     socket.send byte[]:(&kind#[0..1]);
     if data.length socket.send byte[]:data;
   }
   void sendLoginResponse(int eid, int protver, string name, long seed, byte dimension) {
     byte[auto~] data;
     data ~= toField eid;
-    data ~= name.encodeUCS2();
+    data ~= "".encodeUCS2();
+    // data ~= name.encodeUCS2();
     data ~= toField seed;
+    data ~= toField int:0; // survival mode?
     data ~= dimension;
-    sendPacket(1, data[]);
+    data ~= 128;
+    data ~= 8; // not sure what this is
+    
+    sendPacket(0x01, data[]);
     data.free;
   }
   void sendSpawnLocation(int x, y, z) {
@@ -26,7 +31,7 @@ class PacketTx {
     data ~= toField x;
     data ~= toField y;
     data ~= toField z;
-    sendPacket(6, data[]);
+    sendPacket(0x06, data[]);
     data.free;
   }
   void sendPreChunk(int x, z, bool load) {
@@ -174,9 +179,13 @@ class PacketTx {
     sendPacket(0x1d, data[]);
     data.free;
   }
-  void sendKick() {
-    sendPacket(0xff);
-    socket.close;
+  void sendKick(string mesg = null, bool close = true) {
+    byte[auto~] data;
+    data ~= mesg.encodeUCS2();
+    sendPacket(0xff, data[]);
+    data.free;
+    if (close)
+      socket.close;
   }
   void sendTransactionAccept(byte window, short action-number, bool accepted) {
     byte[auto~] data;

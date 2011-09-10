@@ -19,6 +19,7 @@ class BigEndianDataStream {
     else raise-error new Error "DataStream empty. ";
   }
   byte[] take(int sz) {
+    onFailure writeln "@take($sz)";
     while buffer.length < sz
       readMore();
     auto res = buffer[0..sz];
@@ -26,6 +27,7 @@ class BigEndianDataStream {
     return res;
   }
   byte readByte() {
+    onFailure writeln "@readByte";
     return take 1 #[0];
   }
   short readShort() {
@@ -69,13 +71,47 @@ byte x 8 toField(long l) { l = l.htonq; return byte x 8: l; }
 byte x 4 toField(float f) { return toField *int*:&f; }
 byte x 8 toField(double d) { return toField *long*:&d; }
 
+// thanks, tiny utf8-cpp lib
+class iterateUTF8 : Iterator!int {
+  string str;
+  void init(string s) str = s;
+  bool advance() {
+    if (!str.length) return false;
+    
+    int stepsize;
+    char lead = str[0];
+    if (lead < 0x80) stepsize = 1;
+    else if (lead >> 5) == 0x6 stepsize = 2;
+    else if (lead >> 4) == 0xe stepsize = 3;
+    else if (lead >> 3) == 0x1e stepsize = 4;
+    else raise-error new Error "Unrecognized UTF8: $str! ";
+    (string part, str) = str[(0..stepsize, stepsize .. $)];
+    
+    if (part.length == 1) {
+      value = int:part[0];
+    } else if (part.length == 2) {
+      value = ((int:part[0] << 6) & 0x7ff) + int:part[1] & 0x3f;
+    } else if (part.length == 3) {
+      value = ((int:part[0] << 12) & 0xffff) + (int:part[1] << 6) & 0xfff + int:part[2] & 0x3f;
+    } else if (part.length == 4) {
+      value = ((int:part[0] << 18) & 0x1f_ffff) + (int:part[1] << 12) & 0x3_ffff + (int:part[2] << 6) & 0xfff + int:part[3] & 0x3f;
+    }
+    return true;
+  }
+}
+
 byte[] encodeUCS2(string s) {
   byte[auto~] res;
   if s.length > 65535 raise-error new Error "Can't UCS2 encode strings longer than 65535! ";
-  res ~= toField short:s.length;
-  for auto ch <- s {
-    res ~= byte:0;
-    res ~= byte:ch;
+  int count;
+  res ~= [byte:0, 0];
+  short[auto~] test;
+  for auto cp <- new iterateUTF8 s {
+    count ++;
+    test ~= short:cp;
+    res ~= toField short:cp;
   }
+  test.free;
+  *(byte x 2*:res.ptr) = toField short:count;
   return res[];
 }
