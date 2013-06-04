@@ -11,14 +11,14 @@ long ntohq(long l) {
 alias htonq = ntohq;
 
 class BigEndianDataStream {
-  byte[auto~] buffer;
-  Iterator!byte[] sup;
-  void init(Iterator!byte[] sup) this.sup = sup;
+  ubyte[auto~] buffer;
+  Iterator!ubyte[] sup;
+  void init(Iterator!ubyte[] sup) this.sup = sup;
   void readMore() {
     if auto data <- sup buffer ~= data;
-    else raise-error new Error "DataStream empty. ";
+    else raise new Error "DataStream empty. ";
   }
-  byte[] take(int sz) {
+  ubyte[] take(int sz) {
     onFailure writeln "@take($sz)";
     while buffer.length < sz
       readMore();
@@ -26,9 +26,12 @@ class BigEndianDataStream {
     buffer = type-of buffer: buffer[sz .. $];
     return res;
   }
-  byte readByte() {
+  ubyte readByte() {
     onFailure writeln "@readByte";
     return take 1 #[0];
+  }
+  bool readBool() {
+    return bool:(take 1 #[0]);
   }
   short readShort() {
     return short[]: take 2 #[0].ntohs();
@@ -58,18 +61,21 @@ class BigEndianDataStream {
     for short ch <- chars {
       ch = ntohs ch;
       if ch > 127
-        raise-error new Error "Extended UTF character in UCS2: $$int:ch! ";
+        raise new Error "Extended UTF character in UCS2: $(int:ch)! ";
       res ~= char:*byte*:&ch;
     }
     return res[];
   }
+  string readString() {
+    return readUCS2(readShort() * 2);
+  }
 }
 
-byte x 2 toField(short s) { s = s.htons; return byte x 2: s; }
-byte x 4 toField(int i) { i = i.htonl; return byte x 4: i; }
-byte x 8 toField(long l) { l = l.htonq; return byte x 8: l; }
-byte x 4 toField(float f) { return toField *int*:&f; }
-byte x 8 toField(double d) { return toField *long*:&d; }
+ubyte x 2 toField(short s) { s = s.htons; return ubyte x 2: s; }
+ubyte x 4 toField(int i) { i = i.htonl; return ubyte x 4: i; }
+ubyte x 8 toField(long l) { l = l.htonq; return ubyte x 8: l; }
+ubyte x 4 toField(float f) { return toField *int*:&f; }
+ubyte x 8 toField(double d) { return toField *long*:&d; }
 
 // thanks, tiny utf8-cpp lib
 class iterateUTF8 : Iterator!int {
@@ -84,7 +90,7 @@ class iterateUTF8 : Iterator!int {
     else if (lead >> 5) == 0x6 stepsize = 2;
     else if (lead >> 4) == 0xe stepsize = 3;
     else if (lead >> 3) == 0x1e stepsize = 4;
-    else raise-error new Error "Unrecognized UTF8: $str! ";
+    else raise new Error "Unrecognized UTF8: $str! ";
     (string part, str) = str[(0..stepsize, stepsize .. $)];
     
     if (part.length == 1) {
@@ -100,11 +106,11 @@ class iterateUTF8 : Iterator!int {
   }
 }
 
-byte[] encodeUCS2(string s) {
-  byte[auto~] res;
-  if s.length > 65535 raise-error new Error "Can't UCS2 encode strings longer than 65535! ";
+ubyte[] encodeUCS2(string s) {
+  ubyte[auto~] res;
+  if s.length > 65535 raise new Error "Can't UCS2 encode strings longer than 65535! ";
   int count;
-  res ~= [byte:0, 0];
+  res ~= [ubyte:0, 0];
   short[auto~] test;
   for auto cp <- new iterateUTF8 s {
     count ++;
@@ -112,6 +118,6 @@ byte[] encodeUCS2(string s) {
     res ~= toField short:cp;
   }
   test.free;
-  *(byte x 2*:res.ptr) = toField short:count;
+  *(ubyte x 2*:res.ptr) = toField short:count;
   return res[];
 }

@@ -20,62 +20,35 @@ void main() {
   auto server = new Server;
   tp.addTask delegate void() {
     while true {
-      server.waitRead(1);
+      server.waitRead(1000);
       server.readPackets();
     }
   };
-  auto earth-density = new SimplexNoise rng;
-  auto sand-density = new SimplexNoise rng;
-  
-  auto waterline = 56;
-  auto triangle(int at, int spread) return new delegate float(float v) {
-    if v < at return (v - at) / spread;
-    return (at - v) / spread;
-  };
-  auto water-triangle = triangle (waterline - 2, 2);
-  
-  auto dg1 = delegate byte(vec3i ipos) {
-    float noise3x(vec3f v) {
-      return noise3 vec3f(v.x + noise3(v), v.y + noise3(-v), v.z);
-    }
-    auto pos = vec3f(ipos);
-    auto val = 0
-    + noise3x vec3f(pos.x /256f, pos.y /256f, pos.z /256f) * 64
-    - noise3x vec3f(pos.x /128f, pos.y /128f, pos.z /128f) * 32
-    - noise3x vec3f(pos.x / 64f, pos.y / 64f, pos.z / 64f) * 16
-    - noise3x vec3f(pos.x / 32f, pos.y / 32f, pos.z / 32f) * 8
-    - noise3x vec3f(pos.x / 16f, pos.y / 16f, pos.z / 16f) * 4
-    // + noise3x vec3f(pos.x /  8f, pos.y /  8f, pos.z /  8f) * 4
+  // auto earth-density = new SimplexNoise rng;
+  // auto sand-density = new SimplexNoise rng;
+
+  auto heightmap = new SimplexNoise rng;
+  float xeval(SimplexNoise sn, float x, y, z) {
+    return sn.eval(x     , y     , z)             / 32f
+         + sn.eval(x / 2f, y / 2f, z / 2f)        / 16f
+         + sn.eval(x / 4f, y / 4f, z / 4f + 1024) / 8f
+         + sn.eval(x / 8f, y / 8f, z / 8f + 2048) / 4f
+         + sn.eval(x /16f, y /16f, z /16f + 3096) / 2f
     ;
-    val += ipos.y - 60;
-    auto sandf = 2 * sand-density.eval (pos / 96) - 1;
-    sandf += (3 - abs val) / 3;
-    sandf += water-triangle ipos.y;
-    if sandf > 0 {
-      return byte:12;
-    }
-    if val < 0 {
-      if -val > -1 + 12 * earth-density.eval (pos / 64) - ((pos.y - waterline) / 24) return byte:1;
-      return byte:3;
-    }
-    return byte:0;
+  }
+  auto dg = delegate ubyte(vec3i pos) {
+    vec3f fpos = vec3f(pos.x / 16f, pos.y / 16f, pos.z / 16f);
+    auto height = xeval(heightmap, vec3f(
+      fpos.x + xeval(heightmap, fpos.(vec3f(x, y, z + 1024))) * 4,
+      xeval(heightmap, fpos.(vec3f(x, y, z + 3096))) * 4,
+      fpos.z + xeval(heightmap, fpos.(vec3f(x, y, z + 2048))) * 4
+    )) * 96f * xeval(heightmap, fpos.(vec3f(x, 3, z)));
+    if (pos.y < 32 + height) return ubyte:2;
+    else return ubyte:0;
   };
-  auto dg2 = delegate byte(vec3i pos) {
-    auto prelim = dg1(pos);
-    if prelim == 0 {
-      if pos.y < waterline return byte:8;
-    }
-    if prelim == 3 {
-      auto above = dg1(pos + vec3i.Y);
-      if above == 0 {
-        if pos.y > waterline - 1 return byte:2;
-      }
-    }
-    return prelim;
-  };
-  auto world = new World(dg2);
+  auto world = new World(dg);
   while true {
     auto sock = ls.accept();
-    using autoLock server.serverMutex server.connecting ~= IPlayer: new Player (server, world, sock);
+    using LockedMutex:server.serverMutex server.connecting ~= IPlayer: new Player (server, world, sock);
   }
 }

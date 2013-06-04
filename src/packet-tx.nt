@@ -7,118 +7,149 @@ class PacketTx {
   Socket socket;
   IPlayer ip;
   void init(Socket s, IPlayer ip) (socket, this.ip) = (s, ip);
-  void sendPacket(byte kind, byte[] data = byte[]:(null x 2)) {
-    // writeln "$(ip.getName())> $$int:kind $(data)";
-    socket.send byte[]:(&kind#[0..1]);
-    if data.length socket.send byte[]:data;
+  void sendPacket(byte kind, ubyte[] data = null) {
+    writeln "$(ip.getName())> $$int:kind $(data)";
+    socket.send ubyte[]:(&kind#[0..1]);
+    if data.length socket.send ubyte[]:data;
   }
-  void sendLoginResponse(int eid, int protver, string name, long seed, byte dimension) {
-    byte[auto~] data;
+  void sendLoginRequest(int eid, string type, ubyte mode, dimension, difficulty, maxplayers) {
+    ubyte[auto~] data;
     data ~= toField eid;
-    data ~= "".encodeUCS2();
-    // data ~= name.encodeUCS2();
-    data ~= toField seed;
-    data ~= toField int:0; // survival mode?
+    data ~= type.encodeUCS2();
+    data ~= mode;
     data ~= dimension;
-    data ~= 128;
-    data ~= 8; // not sure what this is
+    data ~= difficulty;
+    data ~= 0;
+    data ~= maxplayers;
     
     sendPacket(0x01, data[]);
     data.free;
   }
   void sendSpawnLocation(int x, y, z) {
-    byte[auto~] data;
+    ubyte[auto~] data;
     data ~= toField x;
     data ~= toField y;
     data ~= toField z;
     sendPacket(0x06, data[]);
     data.free;
   }
-  void sendPreChunk(int x, z, bool load) {
-    byte[auto~] data;
-    data ~= toField x;
-    data ~= toField z;
-    data ~= *byte*:&load;
-    sendPacket(0x32, data[]);
-    data.free;
-  }
   void sendInventory((Item, int)[] items) {
-    byte[auto~] data;
+    ubyte[auto~] data;
     data ~= 0; // inv
     data ~= toField short:items.length;
     for auto item <- items
       if item[0] {
         data ~= toField item[0].id;
-        data ~= *byte*:&item[1];
+        data ~= *ubyte*:&item[1];
         data ~= toField short:0;
+        data ~= toField short:-1;
       } else {
         data ~= toField short:-1;
       }
     sendPacket(0x68, data[]);
     data.free;
   }
-  void sendMapChunk(vec3i intPos, vec3i intSize, World.Chunk ch) {
-    byte[auto~] data;
+  void sendUnloadChunk(vec2i intPos) {
+    ubyte[auto~] data;
     data ~= toField intPos.x;
-    data ~= toField short:intPos.y;
-    data ~= toField intPos.z;
-    data ~= *byte*:&intSize.x;
-    data ~= *byte*:&intSize.y;
-    data ~= *byte*:&intSize.z;
-    byte[auto~] types, metadata, light, skylight;
-    types ~= ch.data;
-    for int x <- 0..intSize.x+1
-      for int z <- 0..intSize.z+1 {
-        for (int y = 0; y <= intSize.y; y += 2) {
-          metadata ~= 0;
-          light ~= 0xff;
-          skylight ~= 0xff;
-        }
-      }
-    byte[auto~] all;
-    all ~= types[];    types.free;
-    all ~= metadata[]; metadata.free;
-    all ~= light[];    light.free;
-    all ~= skylight[]; skylight.free;
-    auto def = new Deflate;
-    onSuccess def.fini;
-    auto compressed = def.deflate all[];
-    // writeln "uncompressed size: $(all.length)";
-    all.free;
-    // writeln "compressed size: $(compressed.length)";
-    data ~= toField compressed.length;
-    data ~= compressed;
-    compressed.free;
+    data ~= toField intPos.y;
+    data ~= true;
+    // no new data
+    data ~= toField short:0;
+    data ~= toField short:0;
+    data ~= toField int:0;
     sendPacket(0x33, data[]);
     data.free;
   }
+  void sendMapChunkColumn(vec2i intPos, (int, World.Chunk)[] chs) {
+    scope ubyte[auto~] data;
+    data ~= toField intPos.x;
+    data ~= toField intPos.y;
+    data ~= true;
+    short primask;
+    for auto ch <- chs /*if (!ch[1].air())*/ {
+      primask = short:(primask | 1<<ch[0]);
+    }
+    data ~= toField primask;
+    writeln "send $intPos with mask $primask";
+    data ~= toField short:0;
+    
+    // data ~= *byte*:&intSize.x;
+    // data ~= *byte*:&intSize.y;
+    // data ~= *byte*:&intSize.z;
+    scope ubyte[auto~] types, cMetadata, cLight, cBlocklight, cSkylight;
+    for auto _ch <- chs /*if (!_ch[1].air())*/ {
+      auto ch = _ch[1];
+      types ~= ch.data;
+      scope ubyte[auto~] metadata, blocklight, skylight;
+      for int y <- 0..16 {
+        for int z <- 0..16 {
+          for int x <- 0..16 {
+            metadata ~= 0;
+            blocklight ~= 0xf;
+            skylight ~= 0xf;
+          }
+        }
+      }
+      for int i <- 0..metadata.length/2 {
+        {
+          byte (val1, val2) = metadata[(i*2, i*2+1)];
+          cMetadata ~= ubyte:$ (val1 << 4) | val2;
+        }
+        {
+          byte (val1, val2) = blocklight[(i*2, i*2+1)];
+          cBlocklight ~= ubyte:$ (val1 << 4) | val2;
+        }
+        {
+          byte (val1, val2) = skylight[(i*2, i*2+1)];
+          cSkylight ~= ubyte:$ (val1 << 4) | val2;
+        }
+      }
+    }
+    scope ubyte[auto~] all;
+    scope biomes = [for 0..256: ubyte:0].eval;
+    all ~= types[];
+    all ~= cMetadata[];
+    all ~= cBlocklight[];
+    all ~= cSkylight[];
+    all ~= biomes[];
+    scope def = new Deflate;
+    onSuccess def.fini;
+    scope compressed = def.deflate all[];
+    // writeln "uncompressed size: $(all.length)";
+    // writeln "compressed size: $(compressed.length)";
+    data ~= toField compressed.length;
+    data ~= compressed;
+    sendPacket(0x33, data[]);
+  }
   void sendPickupItemAnim(int eid, Drop d) {
-    byte[auto~] data;
+    ubyte[auto~] data;
     data ~= toField d.eid;
     data ~= toField eid;
     sendPacket(0x16, data[]);
     data.free;
   }
   void sendPlayerPosLook(double x, y, z, float yaw, pitch, bool onGround) {
-    byte[auto~] data;
+    ubyte[auto~] data;
     data ~= toField x;
+    // y and stance are swapped. (?)
     data ~= toField double:(y + 1.65);
     data ~= toField y;
     data ~= toField z;
     data ~= toField yaw;
     data ~= toField pitch;
-    data ~= *byte*:&onGround;
+    data ~= *ubyte*:&onGround;
     sendPacket(0x0d, data[]);
     data.free;
   }
   void sendChatMessage(string msg) {
-    byte[auto~] data;
+    ubyte[auto~] data;
     data ~= msg.encodeUCS2();
     sendPacket(0x03, data[]);
     data.free;
   }
-  void sendEntitySpawn(int eid, string name, abs-vec3i pos, byte yaw, byte pitch) {
-    byte[auto~] data;
+  void sendEntitySpawn(int eid, string name, abs-vec3i pos, ubyte yaw, ubyte pitch) {
+    ubyte[auto~] data;
     data ~= toField eid;
     data ~= name.encodeUCS2();
     data ~= toField pos.x;
@@ -127,10 +158,13 @@ class PacketTx {
     data ~= yaw; // rotation
     data ~= pitch; // pitch
     data ~= toField short:0; // current item
+    data ~= ubyte:0; // index 0, field byte
+    data ~= ubyte:0; // no flags set
+    data ~= ubyte:0x7f;
     sendPacket(0x14, data[]);
     data.free;
   }
-  void sendPosLook(int eid, abs-vec3i pos, byte yaw, byte pitch) {
+  void sendPosLook(int eid, abs-vec3i pos, ubyte yaw, ubyte pitch) {
     ubyte[auto~] data;
     data ~= toField eid;
     data ~= toField pos.x;
@@ -141,57 +175,61 @@ class PacketTx {
     sendPacket(0x22, data[]);
     data.free;
   }
-  void sendBlockUpdate(vec3i worldPos, byte newval) {
-    byte[auto~] data;
+  void sendBlockUpdate(vec3i worldPos, short newval) {
+    ubyte[auto~] data;
     data ~= toField worldPos.x;
-    data ~= *byte*:&worldPos.y;
+    data ~= ubyte:  worldPos.y;
     data ~= toField worldPos.z;
-    data ~= newval;
-    data ~= byte:0;
+    data ~= toField newval;
+    data ~= ubyte:0;
     sendPacket(0x35, data[]);
     data.free;
   }
-  void sendPlayerAnim(int eid, byte anim) {
-    byte[auto~] data;
+  void sendPlayerAnim(int eid, ubyte anim) {
+    ubyte[auto~] data;
     data ~= toField eid;
     data ~= anim;
     sendPacket(0x12, data[]);
     data.free;
   }
   void sendItemSpawn(Drop dr) using dr {
-    byte[auto~] data;
+    ubyte[auto~] data;
     data ~= toField eid;
-    data ~= toField item.id;
-    data ~= byte:1;
-    data ~= toField short:0;
+    data ~= ubyte:2;
     data ~= toField int:pos.x;
     data ~= toField int:pos.y;
     data ~= toField int:pos.z;
-    data ~= byte:0; // rotation
-    data ~= byte:0; // pitch
-    data ~= byte:0; // roll
-    sendPacket(0x15, data[]);
+    data ~= ubyte:0; // pitch
+    data ~= ubyte:0; // yaw
+    // data ~= ubyte:(10 | (5 << 5)); // see http://mc.kev009.com/Entities
+    // data ~= toField short:item.id;
+    // data ~= ubyte:1;
+    // data ~= toField short:0;
+    // data ~= toField short:0;
+    data ~= toField int:0;
+    sendPacket(0x17, data[]);
     data.free;
   }
   void sendEntityRemove(int eid) {
-    byte[auto~] data;
+    ubyte[auto~] data;
+    data ~= ubyte:1;
     data ~= toField eid;
     sendPacket(0x1d, data[]);
     data.free;
   }
   void sendKick(string mesg = null, bool close = true) {
-    byte[auto~] data;
+    ubyte[auto~] data;
     data ~= mesg.encodeUCS2();
     sendPacket(0xff, data[]);
     data.free;
     if (close)
       socket.close;
   }
-  void sendTransactionAccept(byte window, short action-number, bool accepted) {
-    byte[auto~] data;
+  void sendTransactionAccept(ubyte window, short action-number, bool accepted) {
+    ubyte[auto~] data;
     data ~= window;
     data ~= toField action-number;
-    data ~= *byte*: &accepted;
+    data ~= *ubyte*: &accepted;
     sendPacket(0x6a, data[]);
     data.free;
   }

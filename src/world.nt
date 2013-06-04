@@ -3,12 +3,13 @@ module world;
 import drop;
 
 class World {
-  byte delegate(vec3i) genDg;
+  ubyte delegate(vec3i) genDg;
   class Chunk {
     vec3i pos;
-    byte[] data;
+    ubyte[] data;
+    bool air() { for auto i <- int[]:data if i return false; return true; }
     int getIdx(vec3i local) {
-      return local.y + 64 * (local.z + local.x * 16);
+      return local.y + 16 * (local.x + 16 * (local.z));
     }
   }
   Chunk[] chunks;
@@ -23,32 +24,33 @@ class World {
         drop = drops.popEnd;
       } else i ++;
     }
-    if !found raise-error new Error "Can't remove: no such drop! ";
+    if !found raise new Error "Can't remove: no such drop! ";
   }
-  void init(byte delegate(vec3i) dg) {
+  void init(ubyte delegate(vec3i) dg) {
     genDg = dg;
   }
-  // must be divisible by <16, 64, 16>
+  // must be divisible by <16, 16, 16>
   Chunk lookupChunkAt(vec3i pos) {
     for auto chunk <- chunks
       if chunk.pos == pos
         return chunk;
     auto ch = new Chunk;
     ch.pos = pos;
-    byte[auto~] data;
-    for int x <- 0..16
+    ubyte[auto~] data;
+    for int y <- 0..16
       for int z <- 0..16
-        for int y <- 0..64
+        for int x <- 0..16
           data ~= genDg(vec3i(x, y, z) + pos);
     ch.data = data[];
     chunks ~= ch;
     return ch;
   }
   byte lookupBlock(vec3i pos) {
-    auto chunkPos = vec3i(pos.(x >> 4, y >> 6, z >> 4));
-    auto chunkWorldPos = vec3i(chunkPos.(x << 4, y << 6, z << 4));
+    auto chunkPos = vec3i(pos.(x >> 4, y >> 4, z >> 4));
+    auto chunkWorldPos = vec3i(chunkPos.(x << 4, y << 4, z << 4));
     auto chunk = lookupChunkAt chunkWorldPos;
     auto delta = pos - chunkWorldPos;
+    writeln "lookupBlock $pos has $chunkPos and $chunkWorldPos and $delta";
     return chunk.data[chunk.getIdx(delta)];
   }
   void changeBlock(vec3i pos, byte newVal) {

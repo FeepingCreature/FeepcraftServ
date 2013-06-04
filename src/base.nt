@@ -17,7 +17,7 @@ interface IPlayer {
   void removeEntity(int eid);
 }
 
-template removeClassFrom(T) <<EOF
+template removeClassFrom(T) {
   void removeClassFrom(T t) {
     alias ar = *t[0];
     int i;
@@ -30,6 +30,6 @@ template removeClassFrom(T) <<EOF
       }
       i++;
     }
-    raise-error new Error "No $(t[1]) in $(t[0])!";
+    raise new Error "No $(t[1]) in $(t[0])!";
   }
-EOF
+}

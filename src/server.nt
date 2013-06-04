@@ -23,31 +23,31 @@ class Server {
     }
     return res[];
   }
-  void addPlayer(IPlayer pl) using autoLock serverMutex {
+  void addPlayer(IPlayer pl) using LockedMutex:serverMutex {
     players ~= pl;
   }
-  void removePlayer(IPlayer removeMe) using autoLock serverMutex {
+  void removePlayer(IPlayer removeMe) using LockedMutex:serverMutex {
     onFailure writeln "@removePlayer";
     removeClassFrom(&players, removeMe);
   }
-  void removeConnectingPlayer(IPlayer removeMe) using autoLock serverMutex {
+  void removeConnectingPlayer(IPlayer removeMe) using LockedMutex:serverMutex {
     onFailure writeln "@removeConnectingPlayer";
     removeClassFrom(&connecting, removeMe);
   }
   void readPackets() {
     IPlayer[] localPlayers;
     onSuccess localPlayers.free;
-    using autoLock serverMutex localPlayers = players ~ connecting;
+    using LockedMutex:serverMutex localPlayers = players ~ connecting;
     for auto player <- localPlayers {
       Error err;
       set-handler (Error _err) { writeln "While processing $(player.getName()): $_err"; err = _err; invoke-exit "remove"; }
       define-exit "remove" {
-        if sum cat([0], [for pl <- players: eval int:pl == int:player]) {
+        if sum cat([0], [for pl <- players: int:$ int:pl == int:player]) {
           player.removeSelf(quietly=>true);
           broadcast " * $(player.getName()) has disconnected: $err";
         }
         
-        if sum cat([0], [for pl <- connecting: eval int:pl == int:player])
+        if sum cat([0], [for pl <- connecting: int:$ int:pl == int:player])
           removeConnectingPlayer player;
         
         return;
@@ -56,10 +56,10 @@ class Server {
       else player.readPacket();
     }
   }
-  void waitRead(float timeout) {
+  void waitRead(int timeout) {
     using SelectSet ss {
       IPlayer[] localPlayers;
-      using autoLock serverMutex localPlayers = players;
+      using LockedMutex:serverMutex localPlayers = players;
       for auto player <- localPlayers {
         add(player.getSocket(), read => true);
       }
