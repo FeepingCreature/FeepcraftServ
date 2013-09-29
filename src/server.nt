@@ -42,12 +42,12 @@ class Server {
       Error err;
       set-handler (Error _err) { writeln "While processing $(player.getName()): $_err"; err = _err; invoke-exit "remove"; }
       define-exit "remove" {
-        if sum cat([0], [for pl <- players: int:$ int:pl == int:player]) {
+        if sum cat([0], [for pl <- players: int:$ pl is player]) {
           player.removeSelf(quietly=>true);
           broadcast " * $(player.getName()) has disconnected: $err";
         }
         
-        if sum cat([0], [for pl <- connecting: int:$ int:pl == int:player])
+        if sum cat([0], [for pl <- connecting: int:$ pl is player])
           removeConnectingPlayer player;
         
         return;

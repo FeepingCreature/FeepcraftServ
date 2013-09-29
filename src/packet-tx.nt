@@ -13,7 +13,7 @@ class PacketTx {
     if data.length socket.send ubyte[]:data;
   }
   void sendLoginRequest(int eid, string type, ubyte mode, dimension, difficulty, maxplayers) {
-    ubyte[auto~] data;
+    scope ubyte[auto~] data;
     data ~= toField eid;
     data ~= type.encodeUCS2();
     data ~= mode;
@@ -23,18 +23,16 @@ class PacketTx {
     data ~= maxplayers;
     
     sendPacket(0x01, data[]);
-    data.free;
   }
   void sendSpawnLocation(int x, y, z) {
-    ubyte[auto~] data;
+    scope ubyte[auto~] data;
     data ~= toField x;
     data ~= toField y;
     data ~= toField z;
     sendPacket(0x06, data[]);
-    data.free;
   }
   void sendInventory((Item, int)[] items) {
-    ubyte[auto~] data;
+    scope ubyte[auto~] data;
     data ~= 0; // inv
     data ~= toField short:items.length;
     for auto item <- items
@@ -47,10 +45,9 @@ class PacketTx {
         data ~= toField short:-1;
       }
     sendPacket(0x68, data[]);
-    data.free;
   }
   void sendUnloadChunk(vec2i intPos) {
-    ubyte[auto~] data;
+    scope ubyte[auto~] data;
     data ~= toField intPos.x;
     data ~= toField intPos.y;
     data ~= true;
@@ -59,7 +56,6 @@ class PacketTx {
     data ~= toField short:0;
     data ~= toField int:0;
     sendPacket(0x33, data[]);
-    data.free;
   }
   void sendMapChunkColumn(vec2i intPos, (int, World.Chunk)[] chs) {
     scope ubyte[auto~] data;
@@ -123,14 +119,13 @@ class PacketTx {
     sendPacket(0x33, data[]);
   }
   void sendPickupItemAnim(int eid, Drop d) {
-    ubyte[auto~] data;
+    scope ubyte[auto~] data;
     data ~= toField d.eid;
     data ~= toField eid;
     sendPacket(0x16, data[]);
-    data.free;
   }
   void sendPlayerPosLook(double x, y, z, float yaw, pitch, bool onGround) {
-    ubyte[auto~] data;
+    scope ubyte[auto~] data;
     data ~= toField x;
     // y and stance are swapped. (?)
     data ~= toField double:(y + 1.65);
@@ -140,16 +135,17 @@ class PacketTx {
     data ~= toField pitch;
     data ~= *ubyte*:&onGround;
     sendPacket(0x0d, data[]);
-    data.free;
   }
-  void sendChatMessage(string msg) {
-    ubyte[auto~] data;
+  void sendChatMessageJSON(string msg) {
+    scope ubyte[auto~] data;
     data ~= msg.encodeUCS2();
     sendPacket(0x03, data[]);
-    data.free;
+  }
+  void sendChatMessage(string msg) {
+    sendChatMessageJSON "{\"text\":\"$msg\"}";
   }
   void sendEntitySpawn(int eid, string name, abs-vec3i pos, ubyte yaw, ubyte pitch) {
-    ubyte[auto~] data;
+    scope ubyte[auto~] data;
     data ~= toField eid;
     data ~= name.encodeUCS2();
     data ~= toField pos.x;
@@ -162,10 +158,9 @@ class PacketTx {
     data ~= ubyte:0; // no flags set
     data ~= ubyte:0x7f;
     sendPacket(0x14, data[]);
-    data.free;
   }
   void sendPosLook(int eid, abs-vec3i pos, ubyte yaw, ubyte pitch) {
-    ubyte[auto~] data;
+    scope ubyte[auto~] data;
     data ~= toField eid;
     data ~= toField pos.x;
     data ~= toField pos.y;
@@ -173,27 +168,24 @@ class PacketTx {
     data ~= yaw;
     data ~= pitch;
     sendPacket(0x22, data[]);
-    data.free;
   }
   void sendBlockUpdate(vec3i worldPos, short newval) {
-    ubyte[auto~] data;
+    scope ubyte[auto~] data;
     data ~= toField worldPos.x;
     data ~= ubyte:  worldPos.y;
     data ~= toField worldPos.z;
     data ~= toField newval;
     data ~= ubyte:0;
     sendPacket(0x35, data[]);
-    data.free;
   }
   void sendPlayerAnim(int eid, ubyte anim) {
-    ubyte[auto~] data;
+    scope ubyte[auto~] data;
     data ~= toField eid;
     data ~= anim;
     sendPacket(0x12, data[]);
-    data.free;
   }
   void sendItemSpawn(Drop dr) using dr {
-    ubyte[auto~] data;
+    scope ubyte[auto~] data;
     data ~= toField eid;
     data ~= ubyte:2;
     data ~= toField int:pos.x;
@@ -201,36 +193,37 @@ class PacketTx {
     data ~= toField int:pos.z;
     data ~= ubyte:0; // pitch
     data ~= ubyte:0; // yaw
-    // data ~= ubyte:(10 | (5 << 5)); // see http://mc.kev009.com/Entities
-    // data ~= toField short:item.id;
-    // data ~= ubyte:1;
-    // data ~= toField short:0;
-    // data ~= toField short:0;
     data ~= toField int:0;
+    // data ~= toField int:item.id;
+    // data ~= toField short:0; // speed x
+    // data ~= toField short:0; // speed y
+    // data ~= toField short:0; // speed z
     sendPacket(0x17, data[]);
-    data.free;
+  }
+  void sendEntityMetadata(int eid, ubyte[] metadata) {
+    scope ubyte[auto~] data;
+    data ~= toField eid;
+    data ~= metadata;
+    sendPacket(0x28, data[]);
   }
   void sendEntityRemove(int eid) {
-    ubyte[auto~] data;
+    scope ubyte[auto~] data;
     data ~= ubyte:1;
     data ~= toField eid;
     sendPacket(0x1d, data[]);
-    data.free;
   }
   void sendKick(string mesg = null, bool close = true) {
-    ubyte[auto~] data;
+    scope ubyte[auto~] data;
     data ~= mesg.encodeUCS2();
     sendPacket(0xff, data[]);
-    data.free;
     if (close)
       socket.close;
   }
   void sendTransactionAccept(ubyte window, short action-number, bool accepted) {
-    ubyte[auto~] data;
+    scope ubyte[auto~] data;
     data ~= window;
     data ~= toField action-number;
     data ~= *ubyte*: &accepted;
     sendPacket(0x6a, data[]);
-    data.free;
   }
 }

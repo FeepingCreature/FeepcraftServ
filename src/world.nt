@@ -9,22 +9,19 @@ class World {
     ubyte[] data;
     bool air() { for auto i <- int[]:data if i return false; return true; }
     int getIdx(vec3i local) {
-      return local.y + 16 * (local.x + 16 * (local.z));
+      return local.x + 16 * (local.z + 16 * (local.y));
     }
   }
   Chunk[] chunks;
   Drop[] drops;
   void removeDrop(Drop d) {
-    bool found;
     int i;
-    while i < drops.length && !found {
-      auto drop = drops[i];
-      if (int:drop == int:d) {
-        found = true;
+    for ref drop <- drops {
+      if (drop is d) {
         drop = drops.popEnd;
-      } else i ++;
-    }
-    if !found raise new Error "Can't remove: no such drop! ";
+        break;
+      }
+    } then raise new Error "Can't remove: no such drop! ";
   }
   void init(ubyte delegate(vec3i) dg) {
     genDg = dg;
@@ -50,14 +47,15 @@ class World {
     auto chunkWorldPos = vec3i(chunkPos.(x << 4, y << 4, z << 4));
     auto chunk = lookupChunkAt chunkWorldPos;
     auto delta = pos - chunkWorldPos;
-    writeln "lookupBlock $pos has $chunkPos and $chunkWorldPos and $delta";
+    writeln "lookupBlock $pos ($chunkWorldPos $delta $(chunk.getIdx(delta))) has $chunkPos and $chunkWorldPos and $delta";
     return chunk.data[chunk.getIdx(delta)];
   }
-  void changeBlock(vec3i pos, byte newVal) {
-    auto chunkPos = vec3i(pos.(x >> 4, y >> 6, z >> 4));
-    auto chunkWorldPos = vec3i(chunkPos.(x << 4, y << 6, z << 4));
+  void changeBlock(vec3i pos, ubyte newVal) {
+    auto chunkPos = vec3i(pos.(x >> 4, y >> 4, z >> 4));
+    auto chunkWorldPos = vec3i(chunkPos.(x << 4, y << 4, z << 4));
     auto chunk = lookupChunkAt chunkWorldPos;
     auto delta = pos - chunkWorldPos;
+    writeln "$pos ($chunkWorldPos $delta $(chunk.getIdx(delta))) to $newVal";
     chunk.data[chunk.getIdx(delta)] = newVal;
   }
 }

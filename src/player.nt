@@ -94,10 +94,9 @@ class Player : IPlayer {
     return vec3i(x, y, z);
   }
   void sendNewChunk(vec2i v) {
-    (int, World.Chunk)[auto~] column;
+    scope (int, World.Chunk)[auto~] column;
     for (int i <- 0..16) column ~= (i, world.lookupChunkAt $ vec3i(v.(x, i, y)) << 4);
     tx.sendMapChunkColumn(v, column[]);
-    column.free;
   }
   void unloadChunk(vec2i v) {
     tx.sendUnloadChunk(v);
@@ -118,6 +117,7 @@ class Player : IPlayer {
     while i < world.drops.length {
       auto d = world.drops[i];
       if |d.pos - playerAbsPos| / 32 < 1.6 {
+        writeln "$eid picks up $d";
         tx.sendPickupItemAnim (eid, d);
         broadcastEntityRemove d.eid;
         world.removeDrop d;
@@ -168,6 +168,8 @@ class Player : IPlayer {
       playerMovementChecks();
       sendSpawnLocation(0, 64, 0);
       inv.sendMe that;
+      for auto dr <- world.drops
+        spawnItem dr;
       sendPlayerPosLook(x, y, z, yaw, pitch, onGround);
       that.sendChatMessage "<server> Hi! I am feepserv!";
       that.sendChatMessage "<server> I am pretty crashy, so don't";
@@ -230,6 +232,7 @@ class Player : IPlayer {
   void readPlayerEntityAction() {
     auto eid = ds.readInt();
     auto action = ds.readByte();
+    auto horseJumpBoost = ds.readInt(); // lol
     writeln ["?", "Crouch", "Uncrouch", "Leave bed", "Start sprinting", "Stop sprinting"][action];
   }
   void readPlayerUse() {
@@ -246,7 +249,7 @@ class Player : IPlayer {
     // tx.sendPacket(0);
   }
   void updateBlock(vec3i worldPos, ubyte newval) {
-    auto chunkPos = vec3i(worldPos.(x >> 4, y >> 6, z >> 4));
+    auto chunkPos = vec3i(worldPos.(x >> 4, y >> 4, z >> 4));
     bool found;
     while auto ch <- loadedChunks && !found
       if (ch == chunkPos.xz)
@@ -259,7 +262,18 @@ class Player : IPlayer {
   }
   void spawnItem(Drop dr) {
     tx.sendItemSpawn(dr);
-    writeln "$name: spawn item at $(dr.pos) ($$short:dr.item.id)";
+    scope ubyte[auto~] metadata;
+    metadata ~= [ubyte:
+      0b000_00000 /* byte  0 */, 0x00 /* no flags */,
+      0b001_00001 /* short 1 */, 0x00, 0x00 /* air? wtf */,
+      0b101_01010 /* slot  10*/];
+    metadata ~= toField short:dr.item.id; // block id
+    metadata ~= ubyte:1; // item count
+    metadata ~= toField short:0; // item damage
+    metadata ~= toField short:-1; // nbt data
+    metadata ~= ubyte:127; // end
+    tx.sendEntityMetadata(dr.eid, metadata[]);
+    writeln "$name: spawn item at $(dr.pos) ($$short:dr.item.id) metadata $metadata";
   }
   void broadcastUpdateBlock(vec3i pos, ubyte b) {
     for auto player <- [for pl <- server.players: Player: pl] {
@@ -363,6 +377,7 @@ class Player : IPlayer {
         inv.sendMe tx;
         if item {
           auto real-pos = pos + vec3i.([-Y, Y, -Z, Z, -X, X][dir]);
+          world.changeBlock(real-pos, ubyte:byte:block-or-item-id);
           broadcastUpdateBlock(real-pos, ubyte:byte:block-or-item-id);
           writeln "player placed: $block-or-item-id at $(real-pos) (dir $$int:dir)";
         } else writeln "No item to place! ";
@@ -371,8 +386,13 @@ class Player : IPlayer {
   }
   void readServerListPing() {
     // tx.sendKick("Feepserv test server§$(server.players.length)§256");
-    tx.sendKick("§1\x0061\x001.5.2\x00Feepserv test server\x00$(server.players.length)\x00256");
+    tx.sendKick("§1\x0074\x001.6.2\x00Feepserv test server\x00$(server.players.length)\x00256");
     server.removeConnectingPlayer this;
+  }
+  void readPluginMessage() {
+    auto channel = ds.readString();
+    auto data = ds.take(ds.readShort());
+    writeln "@readPluginMessage channel $channel data $data";
   }
   void readPacket() {
     considerPing;
@@ -386,7 +406,16 @@ class Player : IPlayer {
       onFailure writeln "@readPacket (kind)";
       kind = ds.readByte();
     }
-    writeln "$name< $kind";
+    bool trivial(byte b) {
+      return b == 0x00 // ping
+          || b == 0x0a // player placement state
+          || b == 0x0b // player position state
+          || b == 0x0d // position and look
+          || b == 0x12 // animation behavior change
+      ;
+    }
+    if (!trivial kind)
+      writeln "$name< $kind";
     if kind == 0x00 readPing();
     else if kind == 0x02 readHandshake();
     else if kind == 0x03 readChatMessage();
@@ -404,6 +433,7 @@ class Player : IPlayer {
     else if kind == 0x65 readPlayerCloseWindow();
     else if kind == 0x66 readPlayerClickWindow();
     else if kind == 0xcc readPlayerSettings();
+    else if kind == 0xfa readPluginMessage();
     else if kind == 0xfe readServerListPing();
     else if kind == 0xff removeSelf(quietly => false);
     else {
